@@ -427,7 +427,7 @@
           title: "自动分组完成",
           message:
             `按阈值 ${Math.round(result.threshold * 100)}% 分成 ${result.count} 个任务` +
-            `（共 ${result.columns} 列，${result.skipped} 列没有相似列已跳过），` +
+            `（共 ${result.columns} 列，${result.skipped} 列没有相似列或行数不同已跳过），` +
             `累计 ${result.diffs} 处差异` +
             (failed ? `；${failed} 个任务无法比对，见左侧 ❌ 与原因说明。` : "；全部可比对。"),
         });

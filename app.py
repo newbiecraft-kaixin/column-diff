@@ -201,11 +201,14 @@ def _members(
     threshold: float,
     excluded: set[str] | None = None,
     pinned: set[str] | None = None,
+    align_rows: bool = False,
 ) -> list[dict] | None:
     """按阈值筛出与基准列相似的列。
 
     excluded 为用户手动移除、不再自动加回的列；
-    pinned 为用户手动换入的列，即使相似度不达标也保留。
+    pinned 为用户手动换入的列，即使相似度不达标也保留；
+    align_rows 为 True 时只自动并入行数与基准列相同的列（自动分组用），
+    避免把行数不同的列并进来导致整个任务无法按行号对齐。
     """
     seed = _column(seed_uid)
     if seed is None:
@@ -220,6 +223,8 @@ def _members(
     matched = []
     for item in others:
         if item["uid"] in excluded:
+            continue
+        if item["uid"] not in pinned and align_rows and item["rows"] != seed["rows"]:
             continue
         score = sims.get(item["uid"], 0.0)
         if item["uid"] in pinned or (score > 0 and score >= threshold):
@@ -238,6 +243,7 @@ def _refresh_tasks() -> None:
             SETTINGS["threshold"],
             task.get("excluded", set()),
             task.get("pinned", set()),
+            task.get("align_rows", False),
         )
         if members is None:
             TASKS.pop(task_id, None)
@@ -846,6 +852,7 @@ def auto_group():
             for item in columns
             if item["uid"] != seed["uid"]
             and item["uid"] not in assigned
+            and item["rows"] == seed["rows"]  # 行数不同无法按行号对齐，不自动并入
             and row[index[item["uid"]]] > 0
             and row[index[item["uid"]]] >= threshold
         ]
@@ -863,6 +870,7 @@ def auto_group():
             "columns": [],
             "excluded": set(),
             "pinned": set(),
+            "align_rows": True,
         }
         TASKS[task["id"]] = task
         created.append(task)
