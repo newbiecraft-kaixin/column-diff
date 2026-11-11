@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import tempfile
 import uuid
 from collections import Counter
@@ -52,6 +54,8 @@ SETTINGS = {"threshold": 0.8}
 
 MAX_SET_ROWS = 20000  # 集合筛选最多返回的命中行数
 MAX_SET_MISSING = 200  # 集合筛选最多返回的未命中元素数
+MAX_SET_MAP_VALUES = 300  # 哈希映射最多返回的去重值数
+MAX_SET_MAP_POS = 30  # 哈希映射每个值最多返回的出现位置数
 
 _CODES: dict[str, object] = {}  # uid -> 编码后的 numpy 数组
 _SIM_CACHE: dict[str, tuple[frozenset, dict[str, float]]] = {}
@@ -632,12 +636,39 @@ def upload_file():
     return jsonify(meta), 201
 
 
+@app.post("/api/files/<file_id>/open")
+def open_file(file_id: str):
+    """用系统默认程序打开导入的文件（本地运行，服务端直接拉起）。"""
+    item = FILES.get(file_id)
+    if item is None:
+        return jsonify({"error": "文件不存在"}), 404
+    path = Path(item["path"])
+    if not path.exists():
+        return jsonify({"error": "源文件已被移动或删除"}), 404
+    if not hasattr(os, "startfile"):
+        return jsonify({"error": "当前系统不支持直接打开"}), 400
+
+    # 上传件在临时目录里用 uuid 命名，复制一份带原始文件名的副本再打开
+    target = UPLOAD_DIR / "open" / file_id / Path(item["meta"]["name"]).name
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists() or target.stat().st_size != path.stat().st_size:
+            shutil.copy2(path, target)
+        os.startfile(str(target))  # noqa: S606 - 本地工具，打开用户自己导入的文件
+    except OSError as error:
+        return jsonify({"error": f"打开失败：{error}"}), 500
+    return jsonify({"ok": True})
+
+
 @app.delete("/api/files/<file_id>")
 def remove_file(file_id: str):
     item = FILES.pop(file_id, None)
     if item is None:
         return jsonify({"error": "文件不存在"}), 404
-    item["path"].unlink(missing_ok=True)
+    try:
+        item["path"].unlink(missing_ok=True)
+    except OSError:
+        pass  # 文件被 Excel 等程序占用时无法删除临时副本，忽略即可
 
     _clear_caches()
     for task_id in list(TASKS):
@@ -1104,6 +1135,143 @@ def set_filter():
             },
             "truncated": truncated,
             "limit": MAX_SET_ROWS,
+        }
+    )
+
+
+@app.post("/api/row-context")
+def row_context():
+    """按命中行号回读源表上下文，供结果页做「定位」跳转。"""
+    payload = request.get_json(silent=True) or {}
+    item = FILES.get(payload.get("file_id"))
+    if item is None:
+        return jsonify({"error": "文件不存在，请重新导入"}), 404
+    try:
+        sheet_index = int(payload.get("sheet_index"))
+        row = int(payload.get("row"))
+        col_index = int(payload.get("col_index") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "页码或行号不合法"}), 400
+
+    sheet = next(
+        (s for s in item["meta"]["sheets"] if s["index"] == sheet_index), None
+    )
+    if sheet is None:
+        return jsonify({"error": "该页不存在"}), 404
+
+    header_row = sheet.get("header_row", 1)
+    start_row = header_row + 1
+    values = _sheet_values(item, sheet_index, sheet["name"])
+    total = max((len(column) for column in values), default=0)
+    offset = row - start_row
+    if offset < 0 or offset >= total:
+        return jsonify({"error": f"行号超出范围（{start_row}–{start_row + total - 1}）"}), 400
+
+    padding = 6
+    first = max(0, offset - padding)
+    last = min(total - 1, offset + padding)
+
+    bases = [re.sub(r"\(\d+\)$", "", name) for name in sheet["columns"]]
+    counts = Counter(bases)
+    columns = [
+        {"index": index, "name": name, "dup": counts[bases[index]] > 1}
+        for index, name in enumerate(sheet["columns"])
+    ]
+
+    rows = [
+        {
+            "row": start_row + position,
+            "values": [
+                _norm_value(column[position]) if position < len(column) else ""
+                for column in values
+            ],
+        }
+        for position in range(first, last + 1)
+    ]
+
+    return jsonify(
+        {
+            "file_name": item["meta"]["name"],
+            "sheet_index": sheet_index,
+            "sheet_name": sheet["name"],
+            "header_row": header_row,
+            "columns": columns,
+            "rows": rows,
+            "focus_row": row,
+            "focus_column": col_index,
+            "start_row": start_row,
+            "end_row": start_row + total - 1,
+        }
+    )
+
+
+@app.post("/api/set-map")
+def set_map():
+    """哈希映射：把所选列整理成 值 → 出现位置列表，供页面直接可视化。"""
+    payload = request.get_json(silent=True) or {}
+    refs = payload.get("columns") if isinstance(payload.get("columns"), list) else []
+
+    columns: list[dict] = []
+    for ref in refs:
+        column = _column_ref(ref)
+        if column and all(item["uid"] != column["uid"] for item in columns):
+            columns.append(column)
+
+    if not columns:
+        return jsonify({"error": "请先选择列"}), 400
+
+    order: list[str] = []
+    positions: dict[str, list[dict]] = {}
+    counts: dict[str, int] = {}
+    occurrences = 0
+    truncated = False
+
+    for column in columns:
+        start_row = _header_row(column) + 1
+        for index, raw in enumerate(_column_values(column)):
+            value = _norm_value(raw)
+            if not value:
+                continue
+            if value not in positions:
+                if len(order) >= MAX_SET_MAP_VALUES:
+                    truncated = True
+                    continue
+                positions[value] = []
+                counts[value] = 0
+                order.append(value)
+            counts[value] += 1
+            occurrences += 1
+            if len(positions[value]) < MAX_SET_MAP_POS:
+                positions[value].append(
+                    {
+                        "uid": column["uid"],
+                        "file_id": column["file_id"],
+                        "file_name": column["file_name"],
+                        "sheet_index": column["sheet_index"],
+                        "sheet_name": column["sheet_name"],
+                        "column": column["column"],
+                        "col_index": column["col_index"],
+                        "column_dup": column["column_dup"],
+                        "row": start_row + index,
+                    }
+                )
+            else:
+                truncated = True
+
+    return jsonify(
+        {
+            "count": len(order),
+            "occurrences": occurrences,
+            "truncated": truncated,
+            "values": [
+                {
+                    "value": value,
+                    "count": counts[value],
+                    "truncated": counts[value] > len(positions[value]),
+                    "occurrences": positions[value],
+                }
+                for value in order
+            ],
         }
     )
 

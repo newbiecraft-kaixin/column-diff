@@ -35,7 +35,7 @@
   </div>
 </header>
 
-<main class="workspace">
+<main class="workspace" id="comparePage">
   <section class="panel tasks-panel">
     <div class="panel-head">
       <h2>任务 <span class="counter" id="taskCount">00</span></h2>
@@ -93,21 +93,83 @@
   </div>
 </dialog>
 
-<dialog class="picker set-dialog" id="setDialog">
-  <div class="picker-head">
-    <div>
-      <h2 id="setTitle">集合筛选 · 第 1 步：基准集合 N</h2>
-      <p id="setDesc">从文件/页里勾选若干列，取其中不重复的值作为集合 N（不含列名）。</p>
+<main class="workspace set-workspace" id="setPage" hidden>
+  <section class="panel set-side">
+    <div class="panel-head">
+      <h2>集合筛选</h2>
+      <button class="ghost-btn ghost-btn-sm" id="setExit" type="button">← 返回比对</button>
     </div>
-    <button class="icon-btn" id="setClose" type="button" title="关闭">×</button>
-  </div>
-  <div class="picker-body set-body" id="setBody"></div>
-  <div class="picker-foot">
-    <span class="picker-count" id="setCount">N 已选 0 列</span>
-    <div class="picker-foot-actions">
-      <button class="ghost-btn ghost-btn-sm" id="setBack" type="button" hidden>上一步</button>
-      <button class="ghost-btn ghost-btn-sm" id="setClear" type="button">清空</button>
-      <button class="run-btn" id="setNext" type="button" disabled>下一步</button>
+    <div class="set-side-body">
+      <ol class="set-steps" id="setSteps">
+        <li data-step="1" role="button" tabindex="0" title="跳到第 1 步：基准集合 N">
+          <em>01</em>
+          <div>
+            <strong>基准集合 N</strong>
+            <span>从任意文件 / 页勾选若干列，取其不重复的值（不含列名）</span>
+          </div>
+        </li>
+        <li data-step="2" role="button" tabindex="0" title="跳到第 2 步：查找范围 M">
+          <em>02</em>
+          <div>
+            <strong>查找范围 M</strong>
+            <span>再勾选若干列，找出其中属于 N 的每一行</span>
+          </div>
+        </li>
+        <li data-step="3" role="button" tabindex="0" title="跳到第 3 步：筛选结果">
+          <em>03</em>
+          <div>
+            <strong>筛选结果</strong>
+            <span>按文件-页码-列列出命中行的行号与元素</span>
+          </div>
+        </li>
+      </ol>
+      <div class="set-side-info" id="setSideInfo"></div>
+
+      <div class="set-files">
+        <div class="files-head">
+          <h3>已导入文件</h3>
+          <button class="ghost-btn ghost-btn-sm" id="setImportBtn" type="button">＋ 导入</button>
+        </div>
+        <ul class="file-list" id="setFileList"></ul>
+        <p class="files-empty" id="setFilesEmpty">还没有文件，拖拽到这里或点「＋ 导入」</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel set-main">
+    <div class="panel-head">
+      <div class="set-head-text">
+        <h2 id="setTitle">第 1 步 · 基准集合 N</h2>
+        <p class="set-desc" id="setDesc"></p>
+      </div>
+      <span class="counter" id="setCount">N 已选 0 列</span>
+    </div>
+    <div class="detail-body set-body" id="setBody"></div>
+    <div class="set-foot">
+      <span class="set-hint" id="setHint"></span>
+      <div class="set-foot-actions">
+        <button class="ghost-btn ghost-btn-sm" id="setBack" type="button" hidden>上一步</button>
+        <button class="ghost-btn ghost-btn-sm" id="setClear" type="button">清空</button>
+        <button class="run-btn" id="setNext" type="button" disabled>下一步</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog class="picker row-dialog" id="rowDialog">
+  <header class="picker-head">
+    <div>
+      <h3 id="rowTitle">定位</h3>
+      <p class="picker-desc" id="rowDesc"></p>
+    </div>
+    <button class="picker-close" id="rowClose" type="button" aria-label="关闭">×</button>
+  </header>
+  <div class="row-view" id="rowBody"></div>
+  <div class="row-foot">
+    <span class="row-step" id="rowStep"></span>
+    <div class="row-actions">
+      <button class="ghost-btn ghost-btn-sm" id="rowPrev" type="button">上一处</button>
+      <button class="ghost-btn ghost-btn-sm" id="rowNext" type="button">下一处</button>
     </div>
   </div>
 </dialog>

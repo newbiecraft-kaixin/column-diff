@@ -62,15 +62,30 @@
     pickerClear: document.getElementById("pickerClear"),
     pickerCreate: document.getElementById("pickerCreate"),
     setFilterBtn: document.getElementById("setFilterBtn"),
-    setDialog: document.getElementById("setDialog"),
+    comparePage: document.getElementById("comparePage"),
+    setPage: document.getElementById("setPage"),
+    setExit: document.getElementById("setExit"),
+    setSteps: document.getElementById("setSteps"),
+    setSideInfo: document.getElementById("setSideInfo"),
     setTitle: document.getElementById("setTitle"),
     setDesc: document.getElementById("setDesc"),
     setBody: document.getElementById("setBody"),
     setCount: document.getElementById("setCount"),
+    setHint: document.getElementById("setHint"),
     setBack: document.getElementById("setBack"),
     setClear: document.getElementById("setClear"),
     setNext: document.getElementById("setNext"),
-    setClose: document.getElementById("setClose"),
+    setImportBtn: document.getElementById("setImportBtn"),
+    setFileList: document.getElementById("setFileList"),
+    setFilesEmpty: document.getElementById("setFilesEmpty"),
+    rowDialog: document.getElementById("rowDialog"),
+    rowTitle: document.getElementById("rowTitle"),
+    rowDesc: document.getElementById("rowDesc"),
+    rowBody: document.getElementById("rowBody"),
+    rowStep: document.getElementById("rowStep"),
+    rowPrev: document.getElementById("rowPrev"),
+    rowNext: document.getElementById("rowNext"),
+    rowClose: document.getElementById("rowClose"),
     dropmask: document.getElementById("dropmask"),
     toast: document.getElementById("toast"),
   };
@@ -125,6 +140,7 @@
     state.device = data.device;
     state.files = data.files;
     state.tasks = data.tasks;
+    pruneSetState();
     compareCache.clear();
     compareState = { taskId: compareState.taskId, data: null, loading: false, error: "" };
 
@@ -143,6 +159,7 @@
     renderFiles();
     renderDetail();
     renderStatus();
+    if (!els.setPage.hidden) renderSetStep();
   }
 
   function renderHeader() {
@@ -212,6 +229,7 @@
             <select class="header-select" data-id="${file.id}">${headerOptions(file.header_row)}</select>
           </label>
         </div>
+        <button class="file-open" type="button" title="用系统默认程序打开源文件">↗</button>
         <button class="file-del" type="button" title="移除文件">×</button>
       </li>`
     );
@@ -224,12 +242,17 @@
             <span class="file-meta">解析中…</span>
           </div>
           <span></span>
+          <span></span>
         </li>`);
     });
 
     els.fileList.innerHTML = items.join("");
+    if (els.setFileList) els.setFileList.innerHTML = items.join("");
     els.fileCount.textContent = pad2(state.files.length);
     els.filesEmpty.hidden = state.files.length + state.uploads.length > 0;
+    if (els.setFilesEmpty) {
+      els.setFilesEmpty.hidden = state.files.length + state.uploads.length > 0;
+    }
   }
 
   /* ---------- 右侧任务详情 ---------- */
@@ -1156,6 +1179,76 @@
   /* ---------- 集合筛选 ---------- */
 
   let setState = { step: 1, base: [], target: [], result: null, loading: false };
+  let locState = { items: [], index: 0 };
+
+  const SET_STORE = "colcmp.set";
+
+  function setUidIndex() {
+    const index = new Map();
+    state.files.forEach((file) =>
+      file.sheets.forEach((sheet) =>
+        sheet.columns.forEach((column, i) => {
+          const uid = `${file.id}-${sheet.index}-${i}`;
+          index.set(uid, {
+            uid,
+            file_id: file.id,
+            sheet_index: sheet.index,
+            column,
+          });
+        })
+      )
+    );
+    return index;
+  }
+
+  function saveSetState() {
+    const refs = (items) =>
+      items.map(({ uid, file_id, sheet_index, column }) => ({
+        uid,
+        file_id,
+        sheet_index,
+        column,
+      }));
+    try {
+      localStorage.setItem(
+        SET_STORE,
+        JSON.stringify({ base: refs(setState.base), target: refs(setState.target) })
+      );
+    } catch (_) {
+      /* 存储不可用时忽略 */
+    }
+  }
+
+  function restoreSetState() {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(SET_STORE) || "null");
+    } catch (_) {
+      saved = null;
+    }
+    if (!saved) return;
+    const index = setUidIndex();
+    const pick = (items) =>
+      (Array.isArray(items) ? items : [])
+        .map((item) => index.get(item && item.uid))
+        .filter(Boolean);
+    setState.base = pick(saved.base);
+    setState.target = pick(saved.target);
+  }
+
+  function pruneSetState() {
+    const index = setUidIndex();
+    const base = setState.base.filter((item) => index.has(item.uid));
+    const target = setState.target.filter((item) => index.has(item.uid));
+    if (base.length === setState.base.length && target.length === setState.target.length) {
+      return;
+    }
+    setState.base = base;
+    setState.target = target;
+    setState.result = null;
+    if (setState.step === 3) setState.step = 1;
+    saveSetState();
+  }
 
   function setChipGroupsHtml(selected) {
     return state.files
@@ -1184,6 +1277,148 @@
       .join("");
   }
 
+  function setRefLabel(item) {
+    const file = state.files.find((entry) => entry.id === item.file_id);
+    const sheet = file && file.sheets.find((entry) => entry.index === item.sheet_index);
+    return {
+      file_name: file ? file.name : item.file_id,
+      sheet_index: item.sheet_index,
+      sheet_name: sheet ? sheet.name : "",
+      column: item.column,
+    };
+  }
+
+  function setSideRow(item) {
+    const ref = setRefLabel(item);
+    return `<li><span>${esc(ref.file_name)} · 第 ${ref.sheet_index} 页${
+      ref.sheet_name ? ` · ${esc(ref.sheet_name)}` : ""
+    }</span><em>${esc(ref.column)}</em></li>`;
+  }
+
+  function setSideList(items, emptyText) {
+    if (!items.length) {
+      return `<ul class="set-side-list"><li class="set-side-empty">${emptyText}</li></ul>`;
+    }
+    const rows = items.map(setSideRow);
+    if (rows.length <= 3) return `<ul class="set-side-list">${rows.join("")}</ul>`;
+    return `<ul class="set-side-list">${rows.slice(0, 3).join("")}</ul>
+      <details class="set-side-fold">
+        <summary>展开其余 ${rows.length - 3} 列</summary>
+        <ul class="set-side-list">${rows.slice(3).join("")}</ul>
+      </details>`;
+  }
+
+  function renderSetSide() {
+    const step = setState.step;
+    els.setPage.querySelectorAll(".set-steps li").forEach((item) => {
+      const value = Number(item.dataset.step);
+      item.classList.toggle("is-active", value === step);
+      item.classList.toggle("is-done", value < step);
+      item.setAttribute("aria-current", value === step ? "step" : "false");
+    });
+
+    els.setSideInfo.innerHTML = `
+      <h3>集合 N <span>${setState.base.length} 列</span></h3>
+      ${setSideList(setState.base, "还没有勾选基准列")}
+      ${
+        step >= 2
+          ? `<h3>查找范围 M <span>${setState.target.length} 列</span></h3>
+             ${setSideList(setState.target, "还没有勾选查找列")}`
+          : ""
+      }`;
+  }
+
+  let setMapTimer = null;
+  let setMapSeq = 0;
+
+  const setMapNote = (text) => `<p class="set-note set-map-note">${text}</p>`;
+
+  function renderSetMapHtml(data, label) {
+    if (!data.count) return setMapNote("所选列里没有可统计的值。");
+    const items = data.values
+      .map((item) => {
+        const names = item.occurrences.map((occ) => {
+          return `${occ.file_name} · 第${occ.sheet_index}页${
+            occ.sheet_name ? `(${occ.sheet_name})` : ""
+          } · ${occ.column}${occ.column_dup ? `·第${occ.col_index + 1}列` : ""} · 行${occ.row}`;
+        });
+        const tags = names.map(
+          (name) => `<span class="set-map-pos" title="${esc(name)}">${esc(name)}</span>`
+        );
+        const restText = item.truncated
+          ? `另有 ${item.count - item.occurrences.length} 处未列出`
+          : "";
+        const rest = restText ? `<span class="set-map-more">${restText}</span>` : "";
+
+        // 位置较多时折叠成下拉，避免一行被撑得过高
+        const body =
+          tags.length <= 3
+            ? `<div class="set-map-poslist">${tags.join("")}${rest}</div>`
+            : `<details class="set-map-fold">
+                <summary>
+                  <span class="set-map-poslist">${tags.slice(0, 2).join("")}<span class="set-map-more">其余 ${
+                    tags.length - 2
+                  } 处</span></span>
+                </summary>
+                <ul class="set-map-all">
+                  ${names.map((name) => `<li>${esc(name)}</li>`).join("")}
+                  ${restText ? `<li class="set-map-more">${restText}</li>` : ""}
+                </ul>
+              </details>`;
+
+        return `<li>
+          <code class="set-map-key">${esc(item.value)}</code>
+          <span class="set-map-arrow">→</span>
+          ${body}
+          <em class="set-map-count">${item.count}</em>
+        </li>`;
+      })
+      .join("");
+    return `<div class="set-map-head">
+        <h3>哈希映射 · 集合 ${label}</h3>
+        <span>${data.count} 个值 · ${data.occurrences} 次出现${
+          data.truncated ? " · 已截断" : ""
+        }</span>
+      </div>
+      <ul class="set-map-list">${items}</ul>`;
+  }
+
+  async function loadSetMap() {
+    if (setState.step === 3) return;
+    const box = document.getElementById("setMap");
+    if (!box) return;
+    const list = setState.step === 1 ? setState.base : setState.target;
+    const label = setState.step === 1 ? "N" : "M";
+    if (!list.length) {
+      box.innerHTML = setMapNote(`勾选列后，这里按「值 → 出现位置」展示集合 ${label}。`);
+      return;
+    }
+    const seq = ++setMapSeq;
+    box.innerHTML = setMapNote("统计中…");
+    try {
+      const data = await api(
+        "/api/set-map",
+        jsonOptions("POST", {
+          columns: list.map(({ uid, file_id, sheet_index, column }) => ({
+            uid,
+            file_id,
+            sheet_index,
+            column,
+          })),
+        })
+      );
+      if (seq !== setMapSeq) return;
+      box.innerHTML = renderSetMapHtml(data, label);
+    } catch (error) {
+      if (seq === setMapSeq) box.innerHTML = setMapNote(esc(error.message));
+    }
+  }
+
+  function scheduleSetMap() {
+    clearTimeout(setMapTimer);
+    setMapTimer = setTimeout(loadSetMap, 200);
+  }
+
   function paintSetSelection() {
     if (setState.step === 3) return;
     const selected = setState.step === 1 ? setState.base : setState.target;
@@ -1198,30 +1433,81 @@
       : setState.step === 1
         ? "下一步"
         : "开始筛选";
+    renderSetSide();
+    scheduleSetMap();
   }
 
-  function renderSetDialog() {
+  function renderSetStep() {
     const step = setState.step;
     if (step === 3) {
+      if (!setState.result) {
+        setState.step = 1;
+        return renderSetStep();
+      }
       renderSetResult();
       return;
     }
     const isBase = step === 1;
     const selected = isBase ? setState.base : setState.target;
-    els.setTitle.textContent = isBase
-      ? "集合筛选 · 第 1 步：基准集合 N"
-      : "集合筛选 · 第 2 步：查找范围 M";
-    els.setDesc.textContent = isBase
-      ? "从文件/页里勾选若干列，取其中不重复的值作为集合 N（不含列名）。"
-      : `N 已选 ${setState.base.length} 列；再勾选若干列作为查找范围 M，M 中属于 N 的每一行都会按文件-页码-列列出所在行号。`;
-    els.setBody.innerHTML = setChipGroupsHtml(
-      new Set(selected.map((item) => item.uid))
-    );
+    els.setTitle.textContent = isBase ? "第 1 步 · 基准集合 N" : "第 2 步 · 查找范围 M";
     els.setBack.hidden = isBase;
     els.setBack.textContent = "上一步";
     els.setClear.hidden = false;
     els.setNext.hidden = false;
+
+    if (!state.files.length) {
+      els.setDesc.textContent = "先导入 Excel / CSV 文件，再勾选要纳入的列。";
+      els.setBody.innerHTML = `
+        <div class="detail-empty">
+          <span class="empty-mark">集</span>
+          <p>还没有导入文件<br>把 Excel / CSV 拖到页面任意位置，或点下面的按钮导入</p>
+          <button class="ghost-btn" id="setEmptyImport" type="button">＋ 导入文件</button>
+        </div>`;
+      document
+        .getElementById("setEmptyImport")
+        .addEventListener("click", () => els.fileInput.click());
+      els.setCount.textContent = `${isBase ? "N" : "M"} 已选 0 列`;
+      els.setNext.disabled = true;
+      els.setClear.hidden = true;
+      els.setHint.textContent = "支持 .xlsx / .xls / .csv";
+      renderSetSide();
+      return;
+    }
+
+    els.setDesc.textContent = isBase
+      ? "勾选若干列，取其中不重复的值作为集合 N（不包含列名，忽略空值）。"
+      : `N 已选 ${setState.base.length} 列；再勾选若干列作为查找范围 M，M 中属于 N 的每一行都会按文件-页码-列列出所在行号。`;
+    els.setBody.innerHTML = `<div class="set-chips">${setChipGroupsHtml(
+      new Set(selected.map((item) => item.uid))
+    )}</div><div class="set-map" id="setMap"></div>`;
+    els.setBody.scrollTop = 0;
+    els.setBack.hidden = isBase;
+    els.setBack.textContent = "上一步";
+    els.setClear.hidden = false;
+    els.setNext.hidden = false;
+    els.setHint.textContent = isBase
+      ? "可跨文件、跨页勾选"
+      : "开始筛选后按列分组展示命中行";
     paintSetSelection();
+  }
+
+  function goToSetStep(step) {
+    if (setState.loading) return;
+    if (step === 3) {
+      if (!setState.base.length || !setState.target.length) {
+        toast("第 3 步需要先选好集合 N 和查找范围 M");
+        return;
+      }
+      if (setState.result) {
+        setState.step = 3;
+        renderSetResult();
+      } else {
+        runSetFilter();
+      }
+      return;
+    }
+    setState.step = step;
+    renderSetStep();
   }
 
   function toggleSetPick(chip) {
@@ -1238,6 +1524,8 @@
         column: chip.dataset.column,
       });
     }
+    setState.result = null;
+    saveSetState();
     paintSetSelection();
   }
 
@@ -1279,6 +1567,8 @@
     els.setClear.hidden = true;
     els.setNext.hidden = true;
     els.setCount.textContent = `N ${data.base.count} 个值 · 命中 ${data.target.matched_rows} 行`;
+    els.setHint.textContent = "点分组标题可折叠 / 展开明细";
+    renderSetSide();
 
     const groups = new Map();
     data.target.columns.forEach((col) => groups.set(col.uid, { col, rows: [] }));
@@ -1286,6 +1576,9 @@
       const group = groups.get(occ.uid);
       if (group) group.rows.push(occ);
     });
+
+    const locItems = [...groups.values()].flatMap((group) => group.rows);
+    let locIndex = 0;
 
     const groupHtml = [...groups.values()]
       .map(({ col, rows }) => {
@@ -1295,17 +1588,21 @@
           col.column_dup ? `（第 ${col.col_index + 1} 列）` : ""
         }`;
         const body = rows.length
-          ? `<table class="set-table"><thead><tr><th>行号</th><th>元素</th></tr></thead><tbody>${rows
-              .map(
-                (row) =>
-                  `<tr><td class="set-rowno">${row.row}</td><td>${esc(row.value)}</td></tr>`
-              )
+          ? `<table class="set-table"><thead><tr><th>行号</th><th>元素</th><th class="set-loc-head">定位</th></tr></thead><tbody>${rows
+              .map((row) => {
+                const index = locIndex++;
+                return `<tr><td class="set-rowno">${row.row}</td><td>${esc(
+                  row.value
+                )}</td><td class="set-loc-cell"><button class="set-loc" type="button" data-index="${index}">跳到该行</button></td></tr>`;
+              })
               .join("")}</tbody></table>`
           : '<p class="set-note">该列没有命中 N 的元素。</p>';
         return `<details class="set-group"${rows.length <= 200 ? " open" : ""}>
           <summary><span>${title}</span><em>命中 ${col.matched} / ${col.rows} 行</em></summary>${body}</details>`;
       })
       .join("");
+
+    setLocState(locItems);
 
     const missing = data.base.missing_count
       ? `<details class="set-group set-missing">
@@ -1331,14 +1628,84 @@
       ${missing}`;
   }
 
-  function openSetFilter() {
-    if (!state.files.length) {
-      toast("请先导入文件");
-      return;
+  function setLocState(items) {
+    locState = { items, index: 0 };
+  }
+
+  function rowTableHtml(data) {
+    const head = `<tr><th class="row-no">行</th>${data.columns
+      .map(
+        (column) =>
+          `<th${column.index === data.focus_column ? ' class="is-focus-col"' : ""}>${esc(
+            column.name
+          )}</th>`
+      )
+      .join("")}</tr>`;
+    const body = data.rows
+      .map((item) => {
+        const cells = item.values
+          .map(
+            (value, index) =>
+              `<td${index === data.focus_column ? ' class="is-focus-col"' : ""}>${esc(
+                value
+              )}</td>`
+          )
+          .join("");
+        return `<tr${item.row === data.focus_row ? ' class="is-focus-row"' : ""}><td class="row-no">${
+          item.row
+        }</td>${cells}</tr>`;
+      })
+      .join("");
+    return `<table class="row-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  }
+
+  async function openRowView(index) {
+    const total = locState.items.length;
+    if (!total) return;
+    locState.index = ((index % total) + total) % total;
+    const occ = locState.items[locState.index];
+
+    els.rowStep.textContent = `第 ${locState.index + 1} / ${total} 处`;
+    els.rowTitle.textContent = "行定位";
+    els.rowDesc.textContent = "读取源表…";
+    els.rowBody.innerHTML = "";
+    if (!els.rowDialog.open) els.rowDialog.showModal();
+
+    try {
+      const data = await api(
+        "/api/row-context",
+        jsonOptions("POST", {
+          file_id: occ.file_id,
+          sheet_index: occ.sheet_index,
+          row: occ.row,
+          col_index: occ.col_index,
+        })
+      );
+      els.rowTitle.textContent = `${data.file_name} · 第 ${data.sheet_index} 页(${data.sheet_name})`;
+      els.rowDesc.textContent = `${occ.column}${
+        occ.column_dup ? `（第 ${occ.col_index + 1} 列）` : ""
+      } · 行 ${occ.row} · 值 ${occ.value} · 本页数据行 ${data.start_row}–${data.end_row}`;
+      els.rowBody.innerHTML = rowTableHtml(data);
+      els.rowBody
+        .querySelector(".is-focus-row")
+        ?.scrollIntoView({ block: "center" });
+    } catch (error) {
+      els.rowDesc.textContent = error.message;
     }
-    setState = { step: 1, base: [], target: [], result: null, loading: false };
-    renderSetDialog();
-    els.setDialog.showModal();
+  }
+
+  function openSetFilter() {
+    els.comparePage.hidden = true;
+    els.setPage.hidden = false;
+    document.body.classList.add("is-set-view");
+    renderSetStep();
+  }
+
+  function closeSetFilter() {
+    els.setPage.hidden = true;
+    els.comparePage.hidden = false;
+    document.body.classList.remove("is-set-view");
+    saveSetState();
   }
 
   async function saveTaskColumns(taskId, uids) {
@@ -1382,6 +1749,14 @@
     } finally {
       state.uploads = state.uploads.filter((item) => item !== pending);
       await refresh().catch((error) => toast(error.message));
+    }
+  }
+
+  async function openSourceFile(fileId) {
+    try {
+      await api(`/api/files/${fileId}/open`, { method: "POST" });
+    } catch (error) {
+      toast(error.message);
     }
   }
 
@@ -1475,16 +1850,19 @@
     if (compareState.taskId !== task.id) runCompare(task);
   });
 
-  els.fileList.addEventListener("click", (event) => {
-    const item = event.target.closest(".file-item");
-    if (!item || !item.dataset.id) return;
-    if (event.target.closest(".file-del")) removeFile(item.dataset.id);
-  });
-
-  els.fileList.addEventListener("change", (event) => {
-    const select = event.target.closest(".header-select");
-    if (!select) return;
-    changeHeaderRow(select.dataset.id, Number(select.value));
+  [els.fileList, els.setFileList].forEach((list) => {
+    if (!list) return;
+    list.addEventListener("click", (event) => {
+      const item = event.target.closest(".file-item");
+      if (!item || !item.dataset.id) return;
+      if (event.target.closest(".file-del")) removeFile(item.dataset.id);
+      else if (event.target.closest(".file-open")) openSourceFile(item.dataset.id);
+    });
+    list.addEventListener("change", (event) => {
+      const select = event.target.closest(".header-select");
+      if (!select) return;
+      changeHeaderRow(select.dataset.id, Number(select.value));
+    });
   });
 
   els.pickerBody.addEventListener("click", (event) => {
@@ -1520,28 +1898,56 @@
   });
 
   els.setFilterBtn.addEventListener("click", () => openSetFilter());
+  els.setExit.addEventListener("click", () => closeSetFilter());
 
   els.setBody.addEventListener("click", (event) => {
-    if (setState.step === 3) return;
+    if (setState.step === 3) {
+      const loc = event.target.closest(".set-loc");
+      if (loc) openRowView(Number(loc.dataset.index));
+      return;
+    }
     const chip = event.target.closest(".chip[data-uid]");
     if (!chip) return;
     toggleSetPick(chip);
   });
 
+  els.rowPrev.addEventListener("click", () => openRowView(locState.index - 1));
+  els.rowNext.addEventListener("click", () => openRowView(locState.index + 1));
+  els.rowClose.addEventListener("click", () => els.rowDialog.close());
+  els.rowDialog.addEventListener("click", (event) => {
+    if (event.target === els.rowDialog) els.rowDialog.close();
+  });
+
   els.setClear.addEventListener("click", () => {
     if (setState.step === 1) setState.base = [];
     else setState.target = [];
+    setState.result = null;
+    saveSetState();
     paintSetSelection();
+  });
+
+  els.setSteps.addEventListener("click", (event) => {
+    const item = event.target.closest("li[data-step]");
+    if (!item) return;
+    goToSetStep(Number(item.dataset.step));
+  });
+
+  els.setSteps.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const item = event.target.closest("li[data-step]");
+    if (!item) return;
+    event.preventDefault();
+    goToSetStep(Number(item.dataset.step));
   });
 
   els.setBack.addEventListener("click", () => {
     if (setState.step === 3) {
       setState.step = 2;
       setState.result = null;
-      renderSetDialog();
+      renderSetStep();
     } else if (setState.step === 2) {
       setState.step = 1;
-      renderSetDialog();
+      renderSetStep();
     }
   });
 
@@ -1550,19 +1956,15 @@
     if (setState.step === 1) {
       if (!setState.base.length) return;
       setState.step = 2;
-      renderSetDialog();
+      renderSetStep();
     } else if (setState.step === 2) {
       if (!setState.target.length) return;
+      if (!setState.base.length) {
+        toast("请先在第 1 步选择集合 N");
+        return;
+      }
       runSetFilter();
     }
-  });
-
-  els.setClose.addEventListener("click", () => els.setDialog.close());
-  els.setDialog.addEventListener("close", () => {
-    setState = { step: 1, base: [], target: [], result: null, loading: false };
-  });
-  els.setDialog.addEventListener("click", (event) => {
-    if (event.target === els.setDialog) els.setDialog.close();
   });
 
   els.autoGroupBtn.addEventListener("click", autoGroup);
@@ -1591,6 +1993,7 @@
   els.clearTasksBtn.addEventListener("click", clearTasks);
 
   els.pickBtn.addEventListener("click", () => els.fileInput.click());
+  els.setImportBtn.addEventListener("click", () => els.fileInput.click());
 
   els.fileInput.addEventListener("change", () => {
     uploadFiles([...els.fileInput.files]);
@@ -1651,5 +2054,10 @@
     if (files.length) uploadFiles(files);
   });
 
-  refresh().catch((error) => toast(error.message));
+  refresh()
+    .then(() => {
+      restoreSetState();
+      if (!els.setPage.hidden) renderSetStep();
+    })
+    .catch((error) => toast(error.message));
 })();
