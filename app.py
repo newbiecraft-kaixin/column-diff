@@ -408,17 +408,27 @@ def _sheet_names(path: Path) -> list[str | None]:
 
 
 def _detect_header_row(path: Path, sheet: str | None = None) -> int:
-    """自动识别表头行：取前几行里第一个「非空单元格足够多且基本是文本」的行。
+    """自动识别表头行：取前几行里「非空单元格多、且基本都是文本」的一行。
 
     台账第 1 行常是合并大标题（非空单元格很少），真正的表头紧随其后；
-    数据行即使整行都是文本，也不能抢在表头前面，所以取第一个满足条件的行。
+    数据行文本占比可能也很高，所以得分接近时取更早的那一行。
     """
+    scored: list[tuple[int, float]] = []
     for index, row in enumerate(preview_rows(path, sheet, limit=8), start=1):
         cells = [cell for cell in row if cell not in (None, "")]
         if len(cells) < 2:
             continue
         texts = sum(1 for cell in cells if isinstance(cell, str))
-        if texts / len(cells) >= 0.6:
+        ratio = texts / len(cells)
+        if ratio < 0.6:
+            continue
+        scored.append((index, len(cells) * ratio))
+
+    if not scored:
+        return 1
+    best = max(score for _, score in scored)
+    for index, score in scored:
+        if score >= best * 0.9:
             return index
     return 1
 
@@ -1035,5 +1045,12 @@ def file_too_large(_error):
 
 
 if __name__ == "__main__":
-    print(f"列比对服务： http://127.0.0.1:5000  (相似度设备: {device_name()})")
+    import sys
+    import threading
+    import webbrowser
+
+    url = "http://127.0.0.1:5000"
+    print(f"列比对服务： {url}  (相似度设备: {device_name()})")
+    if getattr(sys, "frozen", False):  # 打包后的 exe：启动后自动打开浏览器
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     app.run(host="127.0.0.1", port=5000, debug=False)
