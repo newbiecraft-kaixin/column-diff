@@ -9,8 +9,10 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import uuid
+from collections import Counter
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -73,6 +75,8 @@ def _columns() -> list[dict]:
     for file_id, item in FILES.items():
         meta = item["meta"]
         for sheet in meta["sheets"]:
+            bases = [re.sub(r"\(\d+\)$", "", name) for name in sheet["columns"]]
+            counts = Counter(bases)
             for col_index, column in enumerate(sheet["columns"]):
                 result.append(
                     {
@@ -82,6 +86,8 @@ def _columns() -> list[dict]:
                         "sheet_index": sheet["index"],
                         "sheet_name": sheet["name"],
                         "col_index": col_index,
+                        # 同一页出现重名列时，界面要额外标出列索引
+                        "column_dup": counts[bases[col_index]] > 1,
                         "column": column,
                         "rows": sheet["rows"],
                     }
@@ -111,8 +117,11 @@ def _find_column(file_id: str, sheet_index: int, column: str) -> dict | None:
 
 
 def _task_name(seed: dict) -> str:
-    """任务默认名：文件名-页码-列名。"""
-    return f'{seed["file_name"]}-{seed["sheet_index"]}-{seed["column"]}'
+    """任务默认名：文件名-页码-列名；同页重名列再补列索引。"""
+    suffix = ""
+    if seed.get("column_dup"):
+        suffix = f'-第{seed["col_index"] + 1}列'
+    return f'{seed["file_name"]}-第{seed["sheet_index"]}页-{seed["column"]}{suffix}'
 
 
 def _new_task(seed: dict) -> dict:
@@ -356,6 +365,8 @@ def _compare_task(task: dict) -> dict:
                 "sheet_index": col["sheet_index"],
                 "sheet_name": col["sheet_name"],
                 "column": col["column"],
+                "col_index": col["col_index"],
+                "column_dup": col["column_dup"],
                 "values": _column_values(col),
             }
         )
@@ -365,7 +376,7 @@ def _compare_task(task: dict) -> dict:
     lengths = {len(frame["values"]) for frame in frames}
     if len(lengths) > 1:
         detail = "、".join(
-            f'{frame["file_name"]}（{frame["sheet_index"]}-{frame["column"]}）{len(frame["values"])} 行'
+            f'{frame["file_name"]}（第{frame["sheet_index"]}页·{frame["column"]}）{len(frame["values"])} 行'
             for frame in frames
         )
         raise CompareError(f"参与比对的列行数不一致，按行号无法对齐：{detail}")
@@ -373,7 +384,8 @@ def _compare_task(task: dict) -> dict:
     labels: list[str] = []
     data: dict[str, list] = {}
     for index, frame in enumerate(frames):
-        label = f'{frame["file_name"]}｜{frame["sheet_index"]}-{frame["column"]}'
+        suffix = f'·第{frame["col_index"] + 1}列' if frame["column_dup"] else ""
+        label = f'{frame["file_name"]}｜第{frame["sheet_index"]}页-{frame["column"]}{suffix}'
         if label in data:
             label = f"{label}#{index + 1}"
         labels.append(label)
@@ -420,6 +432,8 @@ def _compare_task(task: dict) -> dict:
                 "file_name": frame["file_name"],
                 "sheet_index": frame["sheet_index"],
                 "column": frame["column"],
+                "col_index": frame["col_index"],
+                "column_dup": frame["column_dup"],
                 "rows": len(frame["values"]),
             }
             for index, frame in enumerate(frames)

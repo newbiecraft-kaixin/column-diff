@@ -84,6 +84,12 @@ def _clip(value) -> str:
     return text if len(text) <= MAX_CELL_CHARS else text[:MAX_CELL_CHARS] + "…"
 
 
+def _col_label(col: dict) -> str:
+    """列显示名；同一页出现重名列时补上列索引，避免分不清是哪一列。"""
+    suffix = f"（第{col['col_index'] + 1}列）" if col.get("column_dup") else ""
+    return f"{col['column']}{suffix}"
+
+
 def build_prompt(result: dict) -> list[dict]:
     labels = [col["label"] for col in result["columns"]]
     total = result["rows"]
@@ -91,7 +97,7 @@ def build_prompt(result: dict) -> list[dict]:
     rate = (1 - len(diffs) / total) * 100 if total else 100.0
 
     stats = "\n".join(
-        f"- {col['file_name']} / 第{col['sheet_index']}页 / {col['column']}：{stat['diffs']} 行不同"
+        f"- {col['file_name']} / 第{col['sheet_index']}页 / {_col_label(col)}：{stat['diffs']} 行不同"
         for col, stat in zip(result["columns"], result["per_column"])
     )
 
@@ -316,7 +322,7 @@ def render_report_html(result: dict, ai: dict | None = None) -> str:
         "<tr><td>{}</td><td>{}</td><td>{}</td><td class='rowno'>{}</td><td class='rowno'>{}</td></tr>".format(
             html.escape(col["file_name"]),
             col["sheet_index"],
-            html.escape(col["column"]),
+            html.escape(_col_label(col)),
             col["rows"],
             stat["diffs"],
         )

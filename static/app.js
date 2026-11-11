@@ -245,6 +245,9 @@
       .map((col) => {
         const isSeed = col.uid === task.seed_uid;
         const percent = col.similarity * 100;
+        const dup = col.column_dup
+          ? `<span class="badge badge-soft">第 ${col.col_index + 1} 列</span>`
+          : "";
         const badges = [
           isSeed ? '<span class="badge">基准</span>' : "",
           pinned.has(col.uid) ? '<span class="badge badge-soft">手动</span>' : "",
@@ -253,7 +256,7 @@
           <tr data-uid="${col.uid}">
             <td class="cell-file" title="${esc(col.file_name)} · 双击更换">${esc(col.file_name)}</td>
             <td class="cell-column" title="双击更换列">
-              ${esc(`${col.sheet_index}-${col.column}`)}${badges}
+              ${esc(col.column)}${dup}${badges}
               <span class="file-meta">第 ${col.sheet_index} 页 · ${esc(col.sheet_name)} · ${col.rows} 行</span>
             </td>
             <td>
@@ -510,6 +513,12 @@
   /* ---------- 执行比对与差异表 ---------- */
 
   async function runCompare(task) {
+    if (task.status === "pending" || task.columns.length < 2) {
+      // 单列任务只提示待配对，不发起比对（否则会拿到 409 红色错误）
+      compareState = { taskId: task.id, data: null, loading: false, error: "" };
+      renderDiffArea();
+      return;
+    }
     const cached = compareCache.get(task.id);
     if (cached) {
       // 再次点开同一任务直接复用结果，不重新请求、不闪
@@ -781,7 +790,11 @@
     }
     const data = compareState.data;
     if (!data) {
-      area.innerHTML = "";
+      const active = state.tasks.find((item) => item.id === state.activeTaskId);
+      area.innerHTML =
+        active && active.status === "pending"
+          ? '<div class="diff-empty">该任务只有 1 列，还没有可对比的列。点「重新选列」再勾一列，或降低阈值后重新分组。</div>'
+          : "";
       return;
     }
     const diffCount = data.diffs.length;
@@ -1095,6 +1108,8 @@
       .map((file) => {
         const sheets = file.sheets
           .map((sheet) => {
+            const bases = sheet.columns.map((name) => name.replace(/\(\d+\)$/, ""));
+            const dup = bases.map((base) => bases.filter((item) => item === base).length > 1);
             const chips = sheet.columns
               .map((column, index) => {
                 const uid = `${file.id}-${sheet.index}-${index}`;
@@ -1110,10 +1125,11 @@
                     ? "已在其它任务中，勾选后移入本任务"
                     : "已在某个任务中"
                   : "点击选择，可多选";
+                const dupMark = dup[index] ? `·第${index + 1}列` : "";
                 return `<button class="${classes}" type="button"
                   data-uid="${uid}" data-file="${file.id}" data-sheet="${sheet.index}"
                   data-column="${esc(column)}" ${disabled ? "disabled" : ""}
-                  title="${hint}">${sheet.index}-${esc(column)}</button>`;
+                  title="${hint}">${esc(column)}${dupMark}</button>`;
               })
               .join("");
             return `<div class="pick-sheet"><span class="pick-sheet-label">第 ${sheet.index} 页</span>${chips || '<span class="pick-sheet-label">无列</span>'}</div>`;
