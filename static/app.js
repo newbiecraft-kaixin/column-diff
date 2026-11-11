@@ -367,14 +367,15 @@
     }
   }
 
-  function askConfirm({ title, message, confirmText = "确定", danger = false }) {
+  function askConfirm({ title, message, confirmText = "确定", danger = false, alertOnly = false }) {
     const dlg = els.confirmDlg;
     const ok = document.getElementById("confirmOk");
     const cancel = document.getElementById("confirmCancel");
     document.getElementById("confirmTitle").textContent = title;
     document.getElementById("confirmMsg").textContent = message;
-    ok.textContent = confirmText;
+    ok.textContent = alertOnly ? "知道了" : confirmText;
     ok.className = danger ? "danger-btn" : "run-btn";
+    cancel.hidden = alertOnly;
     return new Promise((resolve) => {
       let settled = false;
       const finish = (value) => {
@@ -383,6 +384,7 @@
         ok.removeEventListener("click", onOk);
         cancel.removeEventListener("click", onCancel);
         dlg.removeEventListener("close", onClose);
+        cancel.hidden = false;
         if (dlg.open) dlg.close();
         resolve(value);
       };
@@ -408,26 +410,42 @@
       confirmText: "开始分组",
     });
     if (!go) return;
+    const originalText = els.autoGroupBtn.textContent;
     els.autoGroupBtn.disabled = true;
+    els.autoGroupBtn.textContent = "分组中…";
+    toast("正在计算所有列的相似度，文件或列较多时请稍候…");
     try {
       const result = await api("/api/auto-group", { method: "POST" });
       if (result.count) state.activeTaskId = result.created[0].id;
       await refresh();
       if (result.count) {
         const failed = state.tasks.filter((task) => task.status === "failed").length;
-        toast(
-          `自动生成 ${result.count} 个任务，共 ${result.diffs} 处差异，${result.skipped} 列无匹配` +
-            (failed ? `，${failed} 个任务无法比对（见 ❌）` : "，全部可比对")
-        );
         const active = state.tasks.find((task) => task.id === state.activeTaskId);
         if (active) await runCompare(active);
+        await askConfirm({
+          alertOnly: true,
+          title: "自动分组完成",
+          message:
+            `按阈值 ${Math.round(result.threshold * 100)}% 分成 ${result.count} 个任务` +
+            `（共 ${result.columns} 列，${result.skipped} 列没有相似列已跳过），` +
+            `累计 ${result.diffs} 处差异` +
+            (failed ? `；${failed} 个任务无法比对，见左侧 ❌ 与原因说明。` : "；全部可比对。"),
+        });
       } else {
-        toast("没有可自动归组的列（可能都已归组，或相似度不足）");
+        await askConfirm({
+          alertOnly: true,
+          title: "没有找到可自动归组的列",
+          message:
+            `共 ${result.columns} 列，在当前阈值 ${percent}% 下没有任何两列足够相似` +
+            `（例如单个文件里各页列名、内容都不同）。` +
+            `可以调低顶部相似阈值后重试，或用「＋ 新建任务」手动勾选多列。`,
+        });
       }
     } catch (error) {
       toast(error.message);
     } finally {
       els.autoGroupBtn.disabled = false;
+      els.autoGroupBtn.textContent = originalText;
     }
   }
 

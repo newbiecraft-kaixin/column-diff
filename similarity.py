@@ -149,3 +149,58 @@ def similarities(seed: np.ndarray, candidates: list[np.ndarray]) -> np.ndarray:
             )
 
     return result
+
+
+def similarity_matrix(codes: list[np.ndarray]) -> np.ndarray:
+    """一次算出所有列两两之间的相似度（n×n float32），对角线为 1。
+
+    自动分组需要对每一列都和其他列比较；逐列调用 similarities 会把同样的
+    编码反复搬到 GPU、反复建大矩阵，列一多就慢到像卡死。这里把所有列补齐成
+    一个矩阵，分块一次性算完。
+    """
+    count = len(codes)
+    matrix = np.eye(count, dtype=np.float32)
+    if count < 2:
+        return matrix
+
+    max_len = max((len(item) for item in codes), default=0)
+    if max_len == 0:
+        return matrix
+
+    padded = np.zeros((count, max_len), dtype=np.int64)
+    for row, array in enumerate(codes):
+        padded[row, : len(array)] = array
+
+    # 每块参与比较的格子数不超过 CHUNK_CELLS，避免一次吃满内存/显存
+    rows_per_chunk = max(1, CHUNK_CELLS // max(count * max_len, 1))
+    base = torch.from_numpy(padded).to("cuda") if CUDA_AVAILABLE else None
+
+    for start in range(0, count, rows_per_chunk):
+        block = padded[start : start + rows_per_chunk]
+        if CUDA_AVAILABLE:
+            block_tensor = torch.from_numpy(block).to("cuda", non_blocking=True)
+            compared = (
+                (block_tensor[:, None, :] != 0) | (base[None, :, :] != 0)
+            ).sum(dim=2)
+            matched = (
+                (block_tensor[:, None, :] == base[None, :, :])
+                & (block_tensor[:, None, :] != 0)
+            ).sum(dim=2)
+            sim = torch.where(
+                compared > 0,
+                matched.float() / compared.clamp(min=1).float(),
+                torch.zeros_like(matched, dtype=torch.float32),
+            )
+            matrix[start : start + len(block)] = sim.cpu().numpy()
+        else:
+            compared = ((block[:, None, :] != 0) | (padded[None, :, :] != 0)).sum(axis=2)
+            matched = (
+                (block[:, None, :] == padded[None, :, :]) & (block[:, None, :] != 0)
+            ).sum(axis=2)
+            matrix[start : start + len(block)] = np.where(
+                compared > 0,
+                matched / np.maximum(compared, 1),
+                0.0,
+            )
+
+    return matrix

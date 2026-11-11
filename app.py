@@ -35,7 +35,7 @@ from ai_report import (
     save_ai_settings,
     test_connection,
 )
-from similarity import CUDA_AVAILABLE, device_name, encode, similarities
+from similarity import CUDA_AVAILABLE, device_name, encode, similarities, similarity_matrix
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = Path(tempfile.mkdtemp(prefix="colcmp_upload_"))
@@ -50,6 +50,7 @@ SETTINGS = {"threshold": 0.8}
 
 _CODES: dict[str, object] = {}  # uid -> 编码后的 numpy 数组
 _SIM_CACHE: dict[str, tuple[frozenset, dict[str, float]]] = {}
+_MATRIX_CACHE: tuple[frozenset, dict[str, int], object] | None = None
 _COLUMNS_CACHE: list[dict] | None = None
 _INDEX_CACHE: dict[str, dict] | None = None
 _SIGNATURE_CACHE: frozenset | None = None
@@ -181,6 +182,20 @@ def _seed_similarities(seed_uid: str, others: list[dict]) -> dict[str, float]:
     return sims
 
 
+def _sim_matrix() -> tuple[dict[str, int], object]:
+    """所有列两两相似度矩阵（自动分组用，一次算完并缓存）。"""
+    global _MATRIX_CACHE
+    signature = _signature()
+    if _MATRIX_CACHE is not None and _MATRIX_CACHE[0] == signature:
+        return _MATRIX_CACHE[1], _MATRIX_CACHE[2]
+
+    columns = _columns()
+    index = {column["uid"]: position for position, column in enumerate(columns)}
+    matrix = similarity_matrix([_codes(column["uid"]) for column in columns])
+    _MATRIX_CACHE = (signature, index, matrix)
+    return index, matrix
+
+
 def _members(
     seed_uid: str,
     threshold: float,
@@ -296,9 +311,10 @@ def _task_public(task: dict) -> dict:
 
 
 def _clear_caches() -> None:
-    global _COLUMNS_CACHE, _INDEX_CACHE, _SIGNATURE_CACHE
+    global _COLUMNS_CACHE, _INDEX_CACHE, _SIGNATURE_CACHE, _MATRIX_CACHE
     _CODES.clear()
     _SIM_CACHE.clear()
+    _MATRIX_CACHE = None
     _REPORT_CACHE.clear()
     _COLUMNS_CACHE = None
     _INDEX_CACHE = None
@@ -817,17 +833,21 @@ def auto_group():
 
     created = []
     skipped = 0
+    if columns:
+        index, matrix = _sim_matrix()  # 所有列一次性算完，避免逐列重复计算
+    else:
+        index, matrix = {}, None
     for seed in columns:
         if seed["uid"] in assigned:
             continue
-        others = [item for item in columns if item["uid"] != seed["uid"]]
-        sims = _seed_similarities(seed["uid"], others)
+        row = matrix[index[seed["uid"]]]
         group = [
             item["uid"]
-            for item in others
-            if item["uid"] not in assigned
-            and sims.get(item["uid"], 0.0) >= threshold
-            and sims[item["uid"]] > 0
+            for item in columns
+            if item["uid"] != seed["uid"]
+            and item["uid"] not in assigned
+            and row[index[item["uid"]]] > 0
+            and row[index[item["uid"]]] >= threshold
         ]
         if not group:
             skipped += 1
@@ -864,6 +884,8 @@ def auto_group():
             "created": [_task_public(task) for task in created],
             "count": len(created),
             "skipped": skipped,
+            "columns": len(columns),
+            "threshold": threshold,
             "diffs": total_diffs,
         }
     )
