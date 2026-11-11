@@ -84,8 +84,15 @@ def get_report(task_id: str, max_rows: int = 50) -> dict:
 
 @mcp.tool()
 def ai_analyze(task_id: str) -> dict:
-    """调用网页里配置好的大模型，生成该任务的中文分析报告（Markdown）。"""
-    return _post(f"/api/tasks/{task_id}/ai-report")
+    """调用网页里配置好的大模型，生成该任务的中文分析报告（Markdown）。
+
+    未配置 AI 或调用失败时返回 {"ok": false, "error": "原因"}，不抛异常。
+    """
+    try:
+        result = _post(f"/api/tasks/{task_id}/ai-report")
+    except RuntimeError as error:
+        return {"ok": False, "error": str(error)}
+    return {"ok": True, **result}
 
 
 @mcp.tool()
@@ -93,7 +100,11 @@ def export_html(task_id: str) -> dict:
     """导出单文件 HTML 报告到本地 reports 目录，返回文件路径。"""
     response = requests.post(f"{API}/api/tasks/{task_id}/report.html", json={}, timeout=120)
     if response.status_code >= 400:
-        raise RuntimeError(_unwrap(response).get("error", "导出失败"))
+        try:
+            message = response.json().get("error")
+        except ValueError:
+            message = None
+        raise RuntimeError(message or f"导出失败（HTTP {response.status_code}）")
     task_name = get_report(task_id).get("task", "report")
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     target = REPORT_DIR / f"{task_name}-比对报告.html"
@@ -122,7 +133,11 @@ def import_files(paths: list[str]) -> dict:
 
 @mcp.tool()
 def auto_group() -> dict:
-    """按当前相似阈值自动分组：相似列并入同一任务，其余列各自建任务。"""
+    """按当前相似阈值自动分组：相似且行数相同的列并入同一任务。
+
+    返回 created/count/diffs；被跳过的列在 skipped_items 里带原因
+    （相似度不足，或行数不同无法按行号对齐）。
+    """
     return _post("/api/auto-group")
 
 
