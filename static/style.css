@@ -968,6 +968,26 @@ dialog.picker::backdrop {
   letter-spacing: 0.1em;
   color: var(--muted);
   min-width: 92px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.pick-sheet-name {
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--ink-soft);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-sheet-name::before {
+  content: "·";
+  margin-right: 5px;
+  color: var(--muted);
 }
 
 .chip {

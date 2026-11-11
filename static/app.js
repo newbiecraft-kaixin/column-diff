@@ -1095,7 +1095,7 @@
     els.pickerTitle.textContent = task ? "重新选择列" : "选择基准列";
     els.pickerDesc.innerHTML = task
       ? `勾选本任务要参与比对的列，取消勾选即移出；虚线列属于其它任务，勾选后会移入本任务（相似度阈值不参与，完全按你的选择）`
-      : `可一次勾选多列，每个列生成一个任务（文件名-页码-列名）；相似度 ≥ <span id="pickerThreshold">${Math.round(
+      : `可一次勾选多列，每个列生成一个任务（文件名-第N页(页名)-列名）；相似度 ≥ <span id="pickerThreshold">${Math.round(
           state.threshold * 100
         )}%</span> 的列自动并入同一任务`;
     els.pickerThreshold = document.getElementById("pickerThreshold");
@@ -1132,7 +1132,7 @@
                   title="${hint}">${esc(column)}${dupMark}</button>`;
               })
               .join("");
-            return `<div class="pick-sheet"><span class="pick-sheet-label">第 ${sheet.index} 页</span>${chips || '<span class="pick-sheet-label">无列</span>'}</div>`;
+            return `<div class="pick-sheet"><span class="pick-sheet-label">第 ${sheet.index} 页<span class="pick-sheet-name">${esc(sheet.name)}</span></span>${chips || '<span class="pick-sheet-label">无列</span>'}</div>`;
           })
           .join("");
         return `<div class="pick-file"><h3>${esc(file.name)}<span>${file.sheets.length} 页</span></h3>${sheets}</div>`;

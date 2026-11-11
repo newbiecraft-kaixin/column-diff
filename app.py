@@ -117,11 +117,14 @@ def _find_column(file_id: str, sheet_index: int, column: str) -> dict | None:
 
 
 def _task_name(seed: dict) -> str:
-    """任务默认名：文件名-页码-列名；同页重名列再补列索引。"""
+    """任务默认名：文件名-第N页(页名)-列名；同页重名列再补列索引。"""
     suffix = ""
     if seed.get("column_dup"):
         suffix = f'-第{seed["col_index"] + 1}列'
-    return f'{seed["file_name"]}-第{seed["sheet_index"]}页-{seed["column"]}{suffix}'
+    return (
+        f'{seed["file_name"]}-第{seed["sheet_index"]}页'
+        f'({seed["sheet_name"]})-{seed["column"]}{suffix}'
+    )
 
 
 def _new_task(seed: dict) -> dict:
@@ -431,6 +434,7 @@ def _compare_task(task: dict) -> dict:
                 "uid": frame["uid"],
                 "file_name": frame["file_name"],
                 "sheet_index": frame["sheet_index"],
+                "sheet_name": frame["sheet_name"],
                 "column": frame["column"],
                 "col_index": frame["col_index"],
                 "column_dup": frame["column_dup"],

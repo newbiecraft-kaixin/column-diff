@@ -97,7 +97,8 @@ def build_prompt(result: dict) -> list[dict]:
     rate = (1 - len(diffs) / total) * 100 if total else 100.0
 
     stats = "\n".join(
-        f"- {col['file_name']} / 第{col['sheet_index']}页 / {_col_label(col)}：{stat['diffs']} 行不同"
+        f"- {col['file_name']} / 第{col['sheet_index']}页（{col.get('sheet_name') or '未命名'}） / "
+        f"{_col_label(col)}：{stat['diffs']} 行不同"
         for col, stat in zip(result["columns"], result["per_column"])
     )
 
@@ -321,7 +322,7 @@ def render_report_html(result: dict, ai: dict | None = None) -> str:
     stat_rows = "\n".join(
         "<tr><td>{}</td><td>{}</td><td>{}</td><td class='rowno'>{}</td><td class='rowno'>{}</td></tr>".format(
             html.escape(col["file_name"]),
-            col["sheet_index"],
+            html.escape(f'第{col["sheet_index"]}页 · {col.get("sheet_name") or "未命名"}'),
             html.escape(_col_label(col)),
             col["rows"],
             stat["diffs"],
