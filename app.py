@@ -264,6 +264,16 @@ def _task_report(task: dict) -> dict:
     cached = _REPORT_CACHE.get(task["id"])
     if cached and cached[0] == signature:
         return cached[1]
+    if len(task["columns"]) < 2:
+        # 只有一列不是数据错误，属于「还没配上对」，用中性状态提示
+        report = {
+            "state": "pending",
+            "rows": None,
+            "diffs": None,
+            "reason": "只有 1 列，还没有可对比的列：点「重新选列」再勾一列，或降低阈值后重新分组",
+        }
+        _REPORT_CACHE[task["id"]] = (signature, report)
+        return report
     try:
         result = _compare_task(task)
         diffs = result["diffs"]
@@ -297,7 +307,7 @@ def _task_report(task: dict) -> dict:
 
 def _task_public(task: dict) -> dict:
     report = _task_report(task)
-    failed = report["state"] == "failed"
+    state = report["state"]
     ai = task.get("ai_report")
     if ai and ai.get("members") != [col["uid"] for col in task["columns"]]:
         ai = None  # 列变了，旧的分析作废
@@ -309,8 +319,8 @@ def _task_public(task: dict) -> dict:
         "columns": task["columns"],
         "pinned": sorted(task.get("pinned", set())),
         "diff_rows": report["diffs"],
-        "status": "failed" if failed else "ok",
-        "status_hint": report["reason"] if failed else "",
+        "status": state if state in ("failed", "pending") else "ok",
+        "status_hint": report["reason"] if state in ("failed", "pending") else "",
         "report": report,
         "ai_report": ai,
     }
@@ -839,6 +849,7 @@ def auto_group():
 
     created = []
     skipped = 0
+    skipped_items: list[dict] = []
     if columns:
         index, matrix = _sim_matrix()  # 所有列一次性算完，避免逐列重复计算
     else:
@@ -858,6 +869,21 @@ def auto_group():
         ]
         if not group:
             skipped += 1
+            if len(skipped_items) < 20:
+                # 区分原因：相似度不够 / 没有同名列 / 行数不同
+                others = [item for item in columns if item["uid"] != seed["uid"]]
+                same_rows = [item for item in others if item["rows"] == seed["rows"]]
+                if any(row[index[item["uid"]]] > 0 for item in same_rows):
+                    reason = "相似度不足"
+                elif any(item["column"] == seed["column"] for item in same_rows):
+                    reason = "同名但内容差异过大"
+                elif same_rows:
+                    reason = "无同名列"
+                else:
+                    reason = "行数不同或无同名列"
+                skipped_items.append(
+                    {"name": f'{seed["file_name"]}·{seed["column"]}', "reason": reason}
+                )
             continue
 
         assigned.update(group)
@@ -892,6 +918,7 @@ def auto_group():
             "created": [_task_public(task) for task in created],
             "count": len(created),
             "skipped": skipped,
+            "skipped_items": skipped_items,
             "columns": len(columns),
             "threshold": threshold,
             "diffs": total_diffs,

@@ -154,8 +154,13 @@
         const active = task.id === state.activeTaskId ? "is-active" : "";
         const fileCount = new Set(task.columns.map((col) => col.file_id)).size;
         const failed = task.status === "failed";
-        const flag = failed ? "❌" : "✅";
-        const flagTitle = failed ? task.status_hint || "比对失败" : "比对可以执行";
+        const pending = task.status === "pending";
+        const flag = pending ? "🟡" : failed ? "❌" : "✅";
+        const flagTitle = pending
+          ? task.status_hint || "只有 1 列，待配对"
+          : failed
+            ? task.status_hint || "比对失败"
+            : "比对可以执行";
         return `
           <li class="task-item ${active}" data-id="${task.id}" title="${esc(task.name)}">
             <span class="idx">${pad2(index + 1)}</span>
@@ -422,14 +427,21 @@
         const failed = state.tasks.filter((task) => task.status === "failed").length;
         const active = state.tasks.find((task) => task.id === state.activeTaskId);
         if (active) await runCompare(active);
+        const skippedItems = (result.skipped_items || [])
+          .slice(0, 5)
+          .map((item) => `${item.name}（${item.reason}）`)
+          .join("、");
         await askConfirm({
           alertOnly: true,
           title: "自动分组完成",
           message:
             `按阈值 ${Math.round(result.threshold * 100)}% 分成 ${result.count} 个任务` +
-            `（共 ${result.columns} 列，${result.skipped} 列没有相似列或行数不同已跳过），` +
+            `（共 ${result.columns} 列，${result.skipped} 列已跳过），` +
             `累计 ${result.diffs} 处差异` +
-            (failed ? `；${failed} 个任务无法比对，见左侧 ❌ 与原因说明。` : "；全部可比对。"),
+            (failed ? `；${failed} 个任务无法比对，见左侧 ❌ 与原因说明。` : "；全部可比对。") +
+            (skippedItems
+              ? ` 跳过的列：${skippedItems}${result.skipped > 5 ? " 等" : ""}。`
+              : ""),
         });
       } else {
         await askConfirm({
