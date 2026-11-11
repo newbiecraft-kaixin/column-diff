@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.log
+.screenshots/
+.trae-html-share-packages/
+build/
+dist/
+ai_config.json
+.env

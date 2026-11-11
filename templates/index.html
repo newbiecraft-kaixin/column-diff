@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>列比对 · COLUMN DIFF</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-seal">列</span>
+    <div class="brand-text">
+      <h1>列比对</h1>
+      <p>COLUMN DIFF · 台账校对台</p>
+    </div>
+  </div>
+
+  <div class="topbar-tools">
+    <div class="threshold">
+      <label for="thresholdInput">相似阈值</label>
+      <input id="thresholdInput" type="range" min="50" max="100" step="1" value="80">
+      <output id="thresholdValue" for="thresholdInput">80%</output>
+      <span class="device" id="deviceTag">CPU</span>
+    </div>
+    <button class="ghost-btn ghost-btn-sm" id="aiBtn" type="button" title="配置大模型，用于生成分析报告">AI 设置</button>
+    <button class="ghost-btn ghost-btn-sm" id="sidebarBtn" type="button" aria-pressed="false">隐藏侧栏</button>
+  </div>
+
+  <div class="status">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">等待导入文件</span>
+  </div>
+</header>
+
+<main class="workspace">
+  <section class="panel tasks-panel">
+    <div class="panel-head">
+      <h2>任务 <span class="counter" id="taskCount">00</span></h2>
+      <button class="ghost-btn ghost-btn-sm" id="clearTasksBtn" type="button">清空任务</button>
+    </div>
+
+    <ul class="task-list" id="taskList"></ul>
+    <div class="empty" id="tasksEmpty">
+      <span class="empty-mark">⌘</span>
+      <p>还没有任务。<br>导入文件后点「新建任务」，<br>勾选一列或多列即可自动归组相似列。</p>
+      <button class="ghost-btn" id="emptyCreateBtn" type="button">＋ 新建任务</button>
+    </div>
+
+    <div class="files-block">
+      <div class="files-head">
+        <h3>文件 <span class="counter" id="fileCount">00</span></h3>
+        <div class="files-actions">
+          <button class="ghost-btn ghost-btn-sm" id="autoGroupBtn" type="button">自动分组</button>
+          <button class="ghost-btn ghost-btn-sm" id="clearAllBtn" type="button">清空</button>
+          <button class="ghost-btn ghost-btn-sm" id="pickBtn" type="button">＋ 导入</button>
+        </div>
+      </div>
+      <ul class="file-list" id="fileList"></ul>
+      <p class="files-empty" id="filesEmpty">拖拽文件到页面，或点击导入</p>
+    </div>
+  </section>
+
+  <section class="panel detail-panel">
+    <div class="panel-head">
+      <h2>任务详情</h2>
+      <div class="head-actions">
+        <button class="ghost-btn ghost-btn-sm" id="newTaskBtn" type="button">＋ 新建任务</button>
+      </div>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+  </section>
+</main>
+
+<dialog class="picker" id="picker">
+  <div class="picker-head">
+    <div>
+      <h2 id="pickerTitle">选择基准列</h2>
+      <p id="pickerDesc">可一次勾选多列，每个列生成一个任务（文件名-页码-列名）；相似度 ≥ <span id="pickerThreshold">80%</span> 的列自动并入同一任务</p>
+    </div>
+    <button class="icon-btn" id="pickerClose" type="button" title="关闭">×</button>
+  </div>
+  <div class="picker-body" id="pickerBody"></div>
+  <div class="picker-foot">
+    <span class="picker-count" id="pickerCount">已选 0 列</span>
+    <div class="picker-foot-actions">
+      <button class="ghost-btn ghost-btn-sm" id="pickerClear" type="button">清空</button>
+      <button class="run-btn" id="pickerCreate" type="button" disabled>创建任务</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="picker" id="confirmDlg">
+  <div class="confirm-body">
+    <h2 id="confirmTitle">确认操作</h2>
+    <p id="confirmMsg"></p>
+  </div>
+  <div class="confirm-actions">
+    <button class="ghost-btn ghost-btn-sm" id="confirmCancel" type="button">取消</button>
+    <button class="run-btn" id="confirmOk" type="button">确定</button>
+  </div>
+</dialog>
+
+<dialog class="picker ai-dialog" id="aiDialog">
+  <div class="picker-form">
+    <header class="picker-head">
+      <div>
+        <h3>AI 设置</h3>
+        <p class="picker-desc">选择厂商并填写 API Key，用于生成比对分析报告。Key 只保存在本机服务内存中，不写入磁盘。</p>
+      </div>
+      <button class="picker-close" id="aiClose" type="button" aria-label="关闭">×</button>
+    </header>
+    <div class="ai-fields">
+      <label class="field">
+        <span>厂商</span>
+        <select id="aiProvider"></select>
+      </label>
+      <label class="field">
+        <span>API Key</span>
+        <input id="aiKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+        <em class="field-hint" id="aiKeyHint"></em>
+      </label>
+      <label class="field">
+        <span>模型</span>
+        <input id="aiModel" type="text" placeholder="deepseek-chat">
+      </label>
+      <label class="field">
+        <span>Base URL</span>
+        <input id="aiBaseUrl" type="text" placeholder="https://api.deepseek.com/v1">
+      </label>
+    </div>
+    <footer class="picker-foot">
+      <span class="picker-count" id="aiStatus"></span>
+      <div class="picker-actions">
+        <button class="ghost-btn ghost-btn-sm" id="aiTestBtn" type="button">测试连接</button>
+        <button class="run-btn" id="aiSaveBtn" type="button">保存</button>
+      </div>
+    </footer>
+  </div>
+</dialog>
+
+<button class="side-toggle" id="sidebarToggle" type="button" title="收起 / 展开任务栏">⟨</button>
+
+<div class="dropmask" id="dropmask" aria-hidden="true">
+  <div class="dropmask-frame">
+    <span class="dropmask-title">松手放下</span>
+    <span class="dropmask-sub">.XLSX · .XLSM · .CSV</span>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<input type="file" id="fileInput" multiple accept=".xlsx,.xlsm,.csv" hidden>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
