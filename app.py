@@ -50,6 +50,9 @@ FILES: dict[str, dict] = {}  # file_id -> {"path": Path, "meta": dict, "data": {
 TASKS: dict[str, dict] = {}  # task_id -> {"id", "name", "seed_uid", "threshold", "columns"}
 SETTINGS = {"threshold": 0.8}
 
+MAX_SET_ROWS = 20000  # 集合筛选最多返回的命中行数
+MAX_SET_MISSING = 200  # 集合筛选最多返回的未命中元素数
+
 _CODES: dict[str, object] = {}  # uid -> 编码后的 numpy 数组
 _SIM_CACHE: dict[str, tuple[frozenset, dict[str, float]]] = {}
 _MATRIX_CACHE: tuple[frozenset, dict[str, int], object] | None = None
@@ -158,6 +161,62 @@ def _column_values(column: dict) -> list:
     return _sheet_values(FILES[column["file_id"]], column["sheet_index"], column["sheet_name"])[
         column["col_index"]
     ]
+
+
+# ---------- 集合筛选 ----------
+
+
+def _norm_value(value) -> str:
+    """归一化成可比较的文本：去首尾空白，数字去掉多余的 .0。"""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _header_row(column: dict) -> int:
+    sheet = next(
+        (
+            item
+            for item in FILES[column["file_id"]]["meta"]["sheets"]
+            if item["index"] == column["sheet_index"]
+        ),
+        None,
+    )
+    return sheet.get("header_row", 1) if sheet else 1
+
+
+def _column_ref(ref: dict) -> dict | None:
+    """解析前端传来的列引用：优先 uid，兼容 file_id/sheet_index/column。"""
+    if not isinstance(ref, dict):
+        return None
+    uid = ref.get("uid")
+    if uid:
+        column = _column(uid)
+        if column is not None:
+            return column
+    try:
+        sheet_index = int(ref.get("sheet_index"))
+    except (TypeError, ValueError):
+        return None
+    return _find_column(ref.get("file_id"), sheet_index, ref.get("column"))
+
+
+def _column_brief(column: dict) -> dict:
+    return {
+        "uid": column["uid"],
+        "file_id": column["file_id"],
+        "file_name": column["file_name"],
+        "sheet_index": column["sheet_index"],
+        "sheet_name": column["sheet_name"],
+        "column": column["column"],
+        "col_index": column["col_index"],
+        "column_dup": column["column_dup"],
+        "rows": column["rows"],
+    }
 
 
 def _codes(uid: str):
@@ -955,6 +1014,98 @@ def compare_task(task_id: str):
         return jsonify({"error": str(exc)}), 409
     task["diff_rows"] = len(result["diffs"])
     return jsonify(result)
+
+
+@app.post("/api/set-filter")
+def set_filter():
+    """集合筛选：把 M 中每个属于集合 N 的元素按文件-页码-列列出所在行号。"""
+    payload = request.get_json(silent=True) or {}
+    base_refs = payload.get("base") if isinstance(payload.get("base"), list) else []
+    target_refs = payload.get("target") if isinstance(payload.get("target"), list) else []
+
+    base_columns: list[dict] = []
+    for ref in base_refs:
+        column = _column_ref(ref)
+        if column and all(item["uid"] != column["uid"] for item in base_columns):
+            base_columns.append(column)
+
+    target_columns: list[dict] = []
+    for ref in target_refs:
+        column = _column_ref(ref)
+        if column and all(item["uid"] != column["uid"] for item in target_columns):
+            target_columns.append(column)
+
+    if not base_columns:
+        return jsonify({"error": "请先选择基准集合 N 的列"}), 400
+    if not target_columns:
+        return jsonify({"error": "请选择要查找的范围 M 的列"}), 400
+
+    # N：多列数据值合并去重（不含列名，忽略空值）
+    base_values: list[str] = []
+    base_seen: set[str] = set()
+    for column in base_columns:
+        for raw in _column_values(column):
+            key = _norm_value(raw)
+            if key and key not in base_seen:
+                base_seen.add(key)
+                base_values.append(key)
+
+    # M：逐行检查，值属于 N 就记录它的文件/页/列/行号
+    occurrences: list[dict] = []
+    found: set[str] = set()
+    matched_by_column: dict[str, int] = {}
+    truncated = False
+    for column in target_columns:
+        start_row = _header_row(column) + 1
+        matched = 0
+        for index, raw in enumerate(_column_values(column)):
+            key = _norm_value(raw)
+            if not key or key not in base_seen:
+                continue
+            matched += 1
+            found.add(key)
+            if len(occurrences) >= MAX_SET_ROWS:
+                truncated = True
+                continue
+            occurrences.append(
+                {
+                    "value": key,
+                    "uid": column["uid"],
+                    "file_id": column["file_id"],
+                    "file_name": column["file_name"],
+                    "sheet_index": column["sheet_index"],
+                    "sheet_name": column["sheet_name"],
+                    "column": column["column"],
+                    "col_index": column["col_index"],
+                    "column_dup": column["column_dup"],
+                    "row": start_row + index,
+                }
+            )
+        matched_by_column[column["uid"]] = matched
+
+    missing = [value for value in base_values if value not in found]
+    return jsonify(
+        {
+            "base": {
+                "columns": [_column_brief(column) for column in base_columns],
+                "count": len(base_values),
+                "missing": missing[:MAX_SET_MISSING],
+                "missing_count": len(missing),
+                "missing_truncated": len(missing) > MAX_SET_MISSING,
+            },
+            "target": {
+                "columns": [
+                    {**_column_brief(column), "matched": matched_by_column[column["uid"]]}
+                    for column in target_columns
+                ],
+                "matched_rows": sum(matched_by_column.values()),
+                "matched_values": len(found),
+                "occurrences": occurrences,
+            },
+            "truncated": truncated,
+            "limit": MAX_SET_ROWS,
+        }
+    )
 
 
 @app.get("/api/tasks/<task_id>/report.xlsx")

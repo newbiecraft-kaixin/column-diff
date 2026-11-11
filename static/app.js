@@ -61,6 +61,16 @@
     pickerCount: document.getElementById("pickerCount"),
     pickerClear: document.getElementById("pickerClear"),
     pickerCreate: document.getElementById("pickerCreate"),
+    setFilterBtn: document.getElementById("setFilterBtn"),
+    setDialog: document.getElementById("setDialog"),
+    setTitle: document.getElementById("setTitle"),
+    setDesc: document.getElementById("setDesc"),
+    setBody: document.getElementById("setBody"),
+    setCount: document.getElementById("setCount"),
+    setBack: document.getElementById("setBack"),
+    setClear: document.getElementById("setClear"),
+    setNext: document.getElementById("setNext"),
+    setClose: document.getElementById("setClose"),
     dropmask: document.getElementById("dropmask"),
     toast: document.getElementById("toast"),
   };
@@ -1143,6 +1153,194 @@
     els.picker.showModal();
   }
 
+  /* ---------- 集合筛选 ---------- */
+
+  let setState = { step: 1, base: [], target: [], result: null, loading: false };
+
+  function setChipGroupsHtml(selected) {
+    return state.files
+      .map((file) => {
+        const sheets = file.sheets
+          .map((sheet) => {
+            const bases = sheet.columns.map((name) => name.replace(/\(\d+\)$/, ""));
+            const dup = bases.map(
+              (base) => bases.filter((item) => item === base).length > 1
+            );
+            const chips = sheet.columns
+              .map((column, index) => {
+                const uid = `${file.id}-${sheet.index}-${index}`;
+                const dupMark = dup[index] ? ` ·第${index + 1}列` : "";
+                return `<button class="chip${selected.has(uid) ? " is-selected" : ""}" type="button"
+                  data-uid="${uid}" data-file="${esc(file.id)}"
+                  data-sheet="${sheet.index}" data-column="${esc(column)}"
+                  title="${esc(file.name)} · 第 ${sheet.index} 页 · ${esc(sheet.name)}">${esc(column)}${dupMark}</button>`;
+              })
+              .join("");
+            return `<div class="pick-sheet"><span class="pick-sheet-label">第 ${sheet.index} 页<span class="pick-sheet-name">${esc(sheet.name)}</span></span>${chips || '<span class="pick-sheet-label">无列</span>'}</div>`;
+          })
+          .join("");
+        return `<div class="pick-file"><h3>${esc(file.name)}<span>${file.sheets.length} 页</span></h3>${sheets}</div>`;
+      })
+      .join("");
+  }
+
+  function paintSetSelection() {
+    if (setState.step === 3) return;
+    const selected = setState.step === 1 ? setState.base : setState.target;
+    const uids = new Set(selected.map((item) => item.uid));
+    els.setBody.querySelectorAll(".chip[data-uid]").forEach((chip) => {
+      chip.classList.toggle("is-selected", uids.has(chip.dataset.uid));
+    });
+    els.setCount.textContent = `${setState.step === 1 ? "N" : "M"} 已选 ${selected.length} 列`;
+    els.setNext.disabled = selected.length === 0 || setState.loading;
+    els.setNext.textContent = setState.loading
+      ? "筛选中…"
+      : setState.step === 1
+        ? "下一步"
+        : "开始筛选";
+  }
+
+  function renderSetDialog() {
+    const step = setState.step;
+    if (step === 3) {
+      renderSetResult();
+      return;
+    }
+    const isBase = step === 1;
+    const selected = isBase ? setState.base : setState.target;
+    els.setTitle.textContent = isBase
+      ? "集合筛选 · 第 1 步：基准集合 N"
+      : "集合筛选 · 第 2 步：查找范围 M";
+    els.setDesc.textContent = isBase
+      ? "从文件/页里勾选若干列，取其中不重复的值作为集合 N（不含列名）。"
+      : `N 已选 ${setState.base.length} 列；再勾选若干列作为查找范围 M，M 中属于 N 的每一行都会按文件-页码-列列出所在行号。`;
+    els.setBody.innerHTML = setChipGroupsHtml(
+      new Set(selected.map((item) => item.uid))
+    );
+    els.setBack.hidden = isBase;
+    els.setBack.textContent = "上一步";
+    els.setClear.hidden = false;
+    els.setNext.hidden = false;
+    paintSetSelection();
+  }
+
+  function toggleSetPick(chip) {
+    const list = setState.step === 2 ? setState.target : setState.base;
+    const uid = chip.dataset.uid;
+    const index = list.findIndex((item) => item.uid === uid);
+    if (index >= 0) {
+      list.splice(index, 1);
+    } else {
+      list.push({
+        uid,
+        file_id: chip.dataset.file,
+        sheet_index: Number(chip.dataset.sheet),
+        column: chip.dataset.column,
+      });
+    }
+    paintSetSelection();
+  }
+
+  async function runSetFilter() {
+    setState.loading = true;
+    paintSetSelection();
+    const refs = (list) =>
+      list.map(({ uid, file_id, sheet_index, column }) => ({
+        uid,
+        file_id,
+        sheet_index,
+        column,
+      }));
+    try {
+      setState.result = await api(
+        "/api/set-filter",
+        jsonOptions("POST", {
+          base: refs(setState.base),
+          target: refs(setState.target),
+        })
+      );
+      setState.step = 3;
+      renderSetResult();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      setState.loading = false;
+      if (setState.step !== 3) paintSetSelection();
+    }
+  }
+
+  function renderSetResult() {
+    const data = setState.result;
+    if (!data) return;
+    els.setTitle.textContent = "集合筛选结果";
+    els.setDesc.textContent = "M 中属于 N 的元素，按文件-页码-列列出所在行号。";
+    els.setBack.hidden = false;
+    els.setBack.textContent = "重新选择";
+    els.setClear.hidden = true;
+    els.setNext.hidden = true;
+    els.setCount.textContent = `N ${data.base.count} 个值 · 命中 ${data.target.matched_rows} 行`;
+
+    const groups = new Map();
+    data.target.columns.forEach((col) => groups.set(col.uid, { col, rows: [] }));
+    data.target.occurrences.forEach((occ) => {
+      const group = groups.get(occ.uid);
+      if (group) group.rows.push(occ);
+    });
+
+    const groupHtml = [...groups.values()]
+      .map(({ col, rows }) => {
+        const title = `${esc(col.file_name)} · 第 ${col.sheet_index} 页 · ${esc(
+          col.sheet_name
+        )} · ${esc(col.column)}${
+          col.column_dup ? `（第 ${col.col_index + 1} 列）` : ""
+        }`;
+        const body = rows.length
+          ? `<table class="set-table"><thead><tr><th>行号</th><th>元素</th></tr></thead><tbody>${rows
+              .map(
+                (row) =>
+                  `<tr><td class="set-rowno">${row.row}</td><td>${esc(row.value)}</td></tr>`
+              )
+              .join("")}</tbody></table>`
+          : '<p class="set-note">该列没有命中 N 的元素。</p>';
+        return `<details class="set-group"${rows.length <= 200 ? " open" : ""}>
+          <summary><span>${title}</span><em>命中 ${col.matched} / ${col.rows} 行</em></summary>${body}</details>`;
+      })
+      .join("");
+
+    const missing = data.base.missing_count
+      ? `<details class="set-group set-missing">
+          <summary><span>N 中未在 M 出现的元素</span><em>${data.base.missing_count} 个</em></summary>
+          <p class="set-values">${data.base.missing.map(esc).join("、")}${
+            data.base.missing_truncated ? " …" : ""
+          }</p></details>`
+      : "";
+
+    els.setBody.innerHTML = `
+      <div class="set-summary">
+        <div><span>N 集合元素</span><strong>${data.base.count}</strong></div>
+        <div><span>M 命中行</span><strong>${data.target.matched_rows}</strong></div>
+        <div><span>命中元素</span><strong>${data.target.matched_values}</strong></div>
+        <div><span>N 未命中</span><strong>${data.base.missing_count}</strong></div>
+      </div>
+      ${
+        data.truncated
+          ? `<p class="set-note">命中行过多，只展示前 ${data.limit} 行；统计仍按全量计算。</p>`
+          : ""
+      }
+      ${groupHtml || '<p class="set-note">没有任何命中行。</p>'}
+      ${missing}`;
+  }
+
+  function openSetFilter() {
+    if (!state.files.length) {
+      toast("请先导入文件");
+      return;
+    }
+    setState = { step: 1, base: [], target: [], result: null, loading: false };
+    renderSetDialog();
+    els.setDialog.showModal();
+  }
+
   async function saveTaskColumns(taskId, uids) {
     try {
       await api(`/api/tasks/${taskId}/columns`, jsonOptions("PUT", { uids }));
@@ -1319,6 +1517,52 @@
 
   [els.newTaskBtn, els.emptyCreateBtn].forEach((button) => {
     button.addEventListener("click", () => openPicker());
+  });
+
+  els.setFilterBtn.addEventListener("click", () => openSetFilter());
+
+  els.setBody.addEventListener("click", (event) => {
+    if (setState.step === 3) return;
+    const chip = event.target.closest(".chip[data-uid]");
+    if (!chip) return;
+    toggleSetPick(chip);
+  });
+
+  els.setClear.addEventListener("click", () => {
+    if (setState.step === 1) setState.base = [];
+    else setState.target = [];
+    paintSetSelection();
+  });
+
+  els.setBack.addEventListener("click", () => {
+    if (setState.step === 3) {
+      setState.step = 2;
+      setState.result = null;
+      renderSetDialog();
+    } else if (setState.step === 2) {
+      setState.step = 1;
+      renderSetDialog();
+    }
+  });
+
+  els.setNext.addEventListener("click", () => {
+    if (setState.loading) return;
+    if (setState.step === 1) {
+      if (!setState.base.length) return;
+      setState.step = 2;
+      renderSetDialog();
+    } else if (setState.step === 2) {
+      if (!setState.target.length) return;
+      runSetFilter();
+    }
+  });
+
+  els.setClose.addEventListener("click", () => els.setDialog.close());
+  els.setDialog.addEventListener("close", () => {
+    setState = { step: 1, base: [], target: [], result: null, loading: false };
+  });
+  els.setDialog.addEventListener("click", (event) => {
+    if (event.target === els.setDialog) els.setDialog.close();
   });
 
   els.autoGroupBtn.addEventListener("click", autoGroup);

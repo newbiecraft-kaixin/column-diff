@@ -67,6 +67,7 @@
     <div class="panel-head">
       <h2>任务详情</h2>
       <div class="head-actions">
+        <button class="ghost-btn ghost-btn-sm" id="setFilterBtn" type="button">集合筛选</button>
         <button class="ghost-btn ghost-btn-sm" id="newTaskBtn" type="button">＋ 新建任务</button>
       </div>
     </div>
@@ -88,6 +89,25 @@
     <div class="picker-foot-actions">
       <button class="ghost-btn ghost-btn-sm" id="pickerClear" type="button">清空</button>
       <button class="run-btn" id="pickerCreate" type="button" disabled>创建任务</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="picker set-dialog" id="setDialog">
+  <div class="picker-head">
+    <div>
+      <h2 id="setTitle">集合筛选 · 第 1 步：基准集合 N</h2>
+      <p id="setDesc">从文件/页里勾选若干列，取其中不重复的值作为集合 N（不含列名）。</p>
+    </div>
+    <button class="icon-btn" id="setClose" type="button" title="关闭">×</button>
+  </div>
+  <div class="picker-body set-body" id="setBody"></div>
+  <div class="picker-foot">
+    <span class="picker-count" id="setCount">N 已选 0 列</span>
+    <div class="picker-foot-actions">
+      <button class="ghost-btn ghost-btn-sm" id="setBack" type="button" hidden>上一步</button>
+      <button class="ghost-btn ghost-btn-sm" id="setClear" type="button">清空</button>
+      <button class="run-btn" id="setNext" type="button" disabled>下一步</button>
     </div>
   </div>
 </dialog>

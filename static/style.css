@@ -1072,6 +1072,121 @@ dialog.picker::backdrop {
   gap: 8px;
 }
 
+/* ---------- 集合筛选 ---------- */
+
+dialog.set-dialog {
+  width: min(900px, 94vw);
+}
+
+.set-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.set-summary div {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--paper-raised);
+}
+
+.set-summary span {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.set-summary strong {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--serif);
+  font-size: 20px;
+}
+
+.set-group {
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  overflow: hidden;
+}
+
+.set-group summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.set-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.set-group summary span {
+  overflow-wrap: anywhere;
+}
+
+.set-group summary em {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.set-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.set-table th {
+  padding: 6px 14px;
+  background: #efe8da;
+  font-weight: 600;
+  text-align: left;
+}
+
+.set-table td {
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.set-table td.set-rowno {
+  width: 90px;
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.set-note {
+  margin: 8px 0 12px;
+  padding: 0 14px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.set-values {
+  margin: 0;
+  padding: 4px 14px 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.set-missing {
+  border-left: 3px solid var(--warn);
+}
+
 /* ---------- 拖拽遮罩 ---------- */
 
 .dropmask {
